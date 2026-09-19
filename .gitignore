@@ -1,0 +1,16 @@
+# Java
+target/
+*.class
+
+# Eclipse
+.classpath
+.project
+.settings/
+.metadata/
+.sonarlint/
+
+# Logs
+*.log
+
+# Environment / secrets
+.env
