@@ -1,32 +1,43 @@
 package com.paystream.auth.dto;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
-/**
- * Java 21 record:
- * Records are ideal for DTOs because this object is only used
- * to carry immutable request data between the controller and service layer.
+/*
+ * RegisterRequest is a Java 21 sealed interface.
  *
- * Java automatically provides:
- * - private final fields
- * - constructor
- * - accessor methods: username(), email(), password()
- * - equals()
- * - hashCode()
- * - toString()
+ * Public registration has exactly two supported account types:
+ *
+ * CUSTOMER
+ * MERCHANT
+ *
+ * ADMIN is intentionally not represented here.
+ *
+ * Jackson uses the "accountType" property from the JSON request
+ * to determine which concrete request record should be created.
  */
-public record RegisterRequest(
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.EXISTING_PROPERTY,
+        property = "accountType",
+        visible = false
+)
+@JsonSubTypes({
+        @JsonSubTypes.Type(
+                value = CustomerRegisterRequest.class,
+                name = "CUSTOMER"
+        ),
+        @JsonSubTypes.Type(
+                value = MerchantRegisterRequest.class,
+                name = "MERCHANT"
+        )
+})
+public sealed interface RegisterRequest
+        permits CustomerRegisterRequest, MerchantRegisterRequest {
 
-        @NotBlank
-        String username,
+    String username();
 
-        @NotBlank
-        @Email
-        String email,
+    String email();
 
-        @NotBlank
-        String password
-
-) {
+    String password();
 }

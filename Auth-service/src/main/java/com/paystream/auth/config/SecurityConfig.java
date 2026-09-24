@@ -3,42 +3,76 @@ package com.paystream.auth.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 public class SecurityConfig {
 
-	/*
-	 * SecurityFilterChain defines how Spring Security handles incoming HTTP
-	 * requests.
-	 *
-	 * We are currently implementing registration, so the registration endpoint must
-	 * be publicly accessible.
-	 *
-	 * Later, when JWT authentication is implemented, protected endpoints will
-	 * require a valid JWT.
-	 */
 	@Bean
 	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
-		http
-				/*
-				 * Registration is a public endpoint because a user does not have a JWT before
-				 * registering.
-				 */
-				.authorizeHttpRequests(auth -> auth.requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
-						.anyRequest().authenticated())
+		http.authorizeHttpRequests(auth -> auth
 
 				/*
-				 * We are building a stateless REST API rather than a browser-based form
-				 * application.
-				 *
-				 * CSRF protection is primarily designed around browser session/cookie-based
-				 * applications. Our later JWT-based API will authenticate using the
-				 * Authorization header.
+				 * Registration and login are public.
 				 */
-				.csrf(csrf -> csrf.disable());
+				.requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
+
+				/*
+				 * Only ADMIN can access admin endpoints.
+				 */
+				.requestMatchers("/api/auth/admin/**").hasRole("ADMIN")
+
+				/*
+				 * Merchant lookup requires authentication.
+				 */
+				.anyRequest().authenticated())
+
+				/*
+				 * PayStream is a stateless REST API.
+				 */
+				.csrf(csrf -> csrf.disable())
+
+				/*
+				 * Configure JWT Resource Server.
+				 */
+				.oauth2ResourceServer(
+						oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
 
 		return http.build();
+	}
+
+	@Bean
+	public JwtAuthenticationConverter jwtAuthenticationConverter() {
+
+		/*
+		 * Read authorities from our custom JWT claim:
+		 *
+		 * "role": "ADMIN"
+		 */
+		JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+
+		grantedAuthoritiesConverter.setAuthoritiesClaimName("role");
+
+		/*
+		 * Convert:
+		 *
+		 * ADMIN
+		 *
+		 * into:
+		 *
+		 * ROLE_ADMIN
+		 *
+		 * so that hasRole("ADMIN") works.
+		 */
+		grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
+
+		JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+
+		jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+
+		return jwtAuthenticationConverter;
 	}
 }

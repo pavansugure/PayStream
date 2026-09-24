@@ -1,7 +1,10 @@
 package com.paystream.auth.service;
 
+import com.paystream.auth.dto.CustomerRegisterRequest;
 import com.paystream.auth.dto.LoginRequest;
 import com.paystream.auth.dto.LoginResponse;
+import com.paystream.auth.dto.MerchantRegisterRequest;
+import com.paystream.auth.dto.MerchantStatusResponse;
 import com.paystream.auth.dto.RegisterRequest;
 import com.paystream.auth.entity.User;
 import com.paystream.auth.repository.UserRepository;
@@ -19,6 +22,11 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 
+import com.paystream.auth.entity.MerchantProfile;
+import com.paystream.auth.repository.MerchantProfileRepository;
+
+import org.springframework.transaction.annotation.Transactional;
+
 @Service
 public class AuthServiceImpl implements AuthService {
 
@@ -32,53 +40,77 @@ public class AuthServiceImpl implements AuthService {
 	 * creates this service bean.
 	 */
 	private final UserRepository userRepository;
+	private final MerchantProfileRepository merchantProfileRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtEncoder jwtEncoder;
-
 	private final long jwtExpirationMs;
 
-	public AuthServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder,
+	public AuthServiceImpl(UserRepository userRepository, MerchantProfileRepository merchantProfileRepository,
+			PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder,
 			@Value("${jwt.expiration-ms}") long jwtExpirationMs) {
 
 		this.userRepository = userRepository;
+		this.merchantProfileRepository = merchantProfileRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtEncoder = jwtEncoder;
 		this.jwtExpirationMs = jwtExpirationMs;
 	}
 
 	@Override
+	@Transactional
 	public void register(RegisterRequest request) {
 
 		/*
-		 * RegisterRequest is a Java 21 record. Therefore, we access its values using:
-		 *
-		 * request.username() request.email() request.password()
+		 * Check whether the username is already registered.
 		 */
 		if (userRepository.findByUsername(request.username()).isPresent()) {
 			throw new IllegalArgumentException("Username already exists");
 		}
 
+		/*
+		 * Check whether the email is already registered.
+		 */
 		if (userRepository.findByEmail(request.email()).isPresent()) {
 			throw new IllegalArgumentException("Email already exists");
 		}
 
 		/*
-		 * Never store the raw password in the database.
-		 *
-		 * BCrypt generates a one-way password hash. During login, we will later use
-		 * PasswordEncoder.matches() to compare the entered password with this stored
-		 * hash.
+		 * Hash the password before storing the User.
 		 */
 		String encodedPassword = passwordEncoder.encode(request.password());
 
 		/*
-		 * Create the JPA entity that will be persisted to MySQL.
+		 * Java 21 pattern matching over the sealed RegisterRequest hierarchy.
 		 *
-		 * New users receive the default application role USER.
+		 * CUSTOMER: Only a User record is required.
+		 *
+		 * MERCHANT: A User and a MerchantProfile must be created together.
 		 */
-		User user = new User(request.username(), request.email(), encodedPassword, "CUSTOMER");
+		switch (request) {
 
-		userRepository.save(user);
+		case CustomerRegisterRequest customer -> {
+
+			User user = new User(customer.username(), customer.email(), encodedPassword, "CUSTOMER");
+
+			userRepository.save(user);
+		}
+
+		case MerchantRegisterRequest merchant -> {
+
+			User user = new User(merchant.username(), merchant.email(), encodedPassword, "MERCHANT");
+
+			/*
+			 * Save the User first so that the generated User ID exists before creating the
+			 * MerchantProfile.
+			 */
+			User savedUser = userRepository.save(user);
+
+			MerchantProfile merchantProfile = new MerchantProfile(savedUser, merchant.businessName(),
+					merchant.category());
+
+			merchantProfileRepository.save(merchantProfile);
+		}
+		}
 	}
 
 	@Override
@@ -150,5 +182,32 @@ public class AuthServiceImpl implements AuthService {
 		 * Authorization: Bearer <token>
 		 */
 		return new LoginResponse(accessToken, "Bearer");
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public MerchantStatusResponse getMerchantStatus(Long merchantId) {
+
+		MerchantProfile merchantProfile = merchantProfileRepository.findById(merchantId)
+				.orElseThrow(() -> new IllegalArgumentException("Merchant not found"));
+
+		return new MerchantStatusResponse(merchantProfile.getMerchantId(), merchantProfile.getUser().getId(),
+				merchantProfile.getBusinessName(), merchantProfile.getCategory(), merchantProfile.isVerified());
+	}
+
+	@Override
+	@Transactional
+	public void verifyMerchant(Long merchantId) {
+
+		MerchantProfile merchantProfile = merchantProfileRepository.findById(merchantId)
+				.orElseThrow(() -> new IllegalArgumentException("Merchant not found"));
+
+		if (merchantProfile.isVerified()) {
+			throw new IllegalStateException("Merchant is already verified");
+		}
+
+		merchantProfile.setVerified(true);
+
+		merchantProfileRepository.save(merchantProfile);
 	}
 }
