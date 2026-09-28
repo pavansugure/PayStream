@@ -41,4 +41,11 @@ public class TransactionController {
 
 		return transactionService.createTransaction(request, authentication);
 	}
+
+	@GetMapping("/{transactionReference}")
+	public TransactionResponse getTransaction(@PathVariable String transactionReference,
+			Authentication authentication) {
+
+		return transactionService.getTransaction(transactionReference, authentication);
+	}
 }

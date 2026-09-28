@@ -63,10 +63,29 @@ public class TransactionServiceImpl implements TransactionService {
 	}
 
 	@Override
-	public TransactionResponse getTransaction(String transactionReference) {
+	public TransactionResponse getTransaction(String transactionReference, Authentication authentication) {
 
 		Transaction transaction = transactionRepository.findByTransactionReference(transactionReference)
 				.orElseThrow(() -> new IllegalArgumentException("Transaction not found"));
+
+		/*
+		 * The JWT "sub" claim contains the authenticated user's ID.
+		 *
+		 * We use the authenticated identity instead of accepting a customerId from the
+		 * request.
+		 */
+		Long customerId = Long.valueOf(authentication.getName());
+
+		/*
+		 * Ownership check:
+		 *
+		 * The customer can access the transaction only if the transaction belongs to
+		 * the authenticated customer.
+		 */
+		if (!transaction.getCustomerId().equals(customerId)) {
+			throw new org.springframework.security.access.AccessDeniedException(
+					"You are not allowed to access this transaction");
+		}
 
 		return toResponse(transaction);
 	}

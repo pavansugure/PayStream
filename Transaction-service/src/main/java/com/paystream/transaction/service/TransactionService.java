@@ -8,5 +8,5 @@ public interface TransactionService {
 
 	TransactionResponse createTransaction(CreateTransactionRequest request, Authentication authentication);
 
-	TransactionResponse getTransaction(String transactionReference);
+	TransactionResponse getTransaction(String transactionReference, Authentication authentication);
 }

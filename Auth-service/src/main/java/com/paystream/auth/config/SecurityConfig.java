@@ -4,7 +4,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
@@ -15,29 +14,17 @@ public class SecurityConfig {
 
 		http.authorizeHttpRequests(auth -> auth
 
-				/*
-				 * Registration and login are public.
-				 */
+				// Public endpoints
 				.requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
 
-				/*
-				 * Only ADMIN can access admin endpoints.
-				 */
+				// Only ADMIN can verify merchants
 				.requestMatchers("/api/auth/admin/**").hasRole("ADMIN")
 
-				/*
-				 * Merchant lookup requires authentication.
-				 */
+				// All remaining endpoints require authentication
 				.anyRequest().authenticated())
 
-				/*
-				 * PayStream is a stateless REST API.
-				 */
 				.csrf(csrf -> csrf.disable())
 
-				/*
-				 * Configure JWT Resource Server.
-				 */
 				.oauth2ResourceServer(
 						oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
 
@@ -47,32 +34,20 @@ public class SecurityConfig {
 	@Bean
 	public JwtAuthenticationConverter jwtAuthenticationConverter() {
 
-		/*
-		 * Read authorities from our custom JWT claim:
-		 *
-		 * "role": "ADMIN"
-		 */
-		JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+		JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
 
-		grantedAuthoritiesConverter.setAuthoritiesClaimName("role");
+		converter.setJwtGrantedAuthoritiesConverter(jwt -> {
 
-		/*
-		 * Convert:
-		 *
-		 * ADMIN
-		 *
-		 * into:
-		 *
-		 * ROLE_ADMIN
-		 *
-		 * so that hasRole("ADMIN") works.
-		 */
-		grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
+			String role = jwt.getClaimAsString("role");
 
-		JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+			if (role == null || role.isBlank()) {
+				return java.util.List.of();
+			}
 
-		jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+			return java.util.List
+					.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role));
+		});
 
-		return jwtAuthenticationConverter;
+		return converter;
 	}
 }
