@@ -21,6 +21,10 @@ public class RabbitMQConfig {
 
 	public static final String TRANSACTION_INITIATED_ROUTING_KEY = "transaction.initiated";
 
+	public static final String FRAUD_CHECK_COMPLETED_QUEUE = "fraud.check.completed.queue";
+
+	public static final String FRAUD_CHECK_COMPLETED_ROUTING_KEY = "fraud.check.completed";
+
 	@Bean
 	public DirectExchange transactionExchange() {
 		return new DirectExchange(TRANSACTION_EXCHANGE, true, false);
@@ -36,6 +40,18 @@ public class RabbitMQConfig {
 
 		return BindingBuilder.bind(transactionInitiatedQueue).to(transactionExchange)
 				.with(TRANSACTION_INITIATED_ROUTING_KEY);
+	}
+
+	@Bean
+	public Queue fraudCheckCompletedQueue() {
+		return new Queue(FRAUD_CHECK_COMPLETED_QUEUE, true);
+	}
+
+	@Bean
+	public Binding fraudCheckCompletedBinding(Queue fraudCheckCompletedQueue, DirectExchange transactionExchange) {
+
+		return BindingBuilder.bind(fraudCheckCompletedQueue).to(transactionExchange)
+				.with(FRAUD_CHECK_COMPLETED_ROUTING_KEY);
 	}
 
 	@Bean

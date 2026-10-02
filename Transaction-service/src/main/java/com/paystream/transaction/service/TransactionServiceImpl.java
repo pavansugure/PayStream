@@ -15,6 +15,8 @@ import com.paystream.transaction.messaging.TransactionEventPublisher;
 import com.paystream.transaction.repository.TransactionRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import com.paystream.transaction.messaging.FraudCheckCompletedEventPublisher;
+import com.paystream.transaction.event.FraudCheckCompletedEvent;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -26,15 +28,18 @@ public class TransactionServiceImpl implements TransactionService {
 	private final MerchantValidationClient merchantValidationClient;
 	private final FraudClient fraudClient;
 	private final TransactionEventPublisher transactionEventPublisher;
+	private final FraudCheckCompletedEventPublisher fraudCheckCompletedEventPublisher;
 
 	public TransactionServiceImpl(TransactionRepository transactionRepository,
 			MerchantValidationClient merchantValidationClient, FraudClient fraudClient,
-			TransactionEventPublisher transactionEventPublisher) {
+			TransactionEventPublisher transactionEventPublisher,
+			FraudCheckCompletedEventPublisher fraudCheckCompletedEventPublisher) {
 
 		this.transactionRepository = transactionRepository;
 		this.merchantValidationClient = merchantValidationClient;
 		this.fraudClient = fraudClient;
 		this.transactionEventPublisher = transactionEventPublisher;
+		this.fraudCheckCompletedEventPublisher = fraudCheckCompletedEventPublisher;
 	}
 
 	/**
@@ -79,9 +84,18 @@ public class TransactionServiceImpl implements TransactionService {
 		TransactionStatus finalStatus = mapFraudDecision(fraudResponse.decision());
 
 		savedTransaction.setStatus(finalStatus);
+
 		savedTransaction.setUpdatedAt(Instant.now());
 
 		Transaction updatedTransaction = transactionRepository.save(savedTransaction);
+
+		FraudCheckCompletedEvent fraudCheckCompletedEvent = new FraudCheckCompletedEvent(UUID.randomUUID().toString(),
+				updatedTransaction.getTransactionReference(), updatedTransaction.getCustomerId(),
+				updatedTransaction.getMerchantId(), updatedTransaction.getAmount(), updatedTransaction.getCurrency(),
+				updatedTransaction.getStatus(), fraudResponse.decision(), fraudResponse.reason(),
+				updatedTransaction.getUpdatedAt());
+
+		fraudCheckCompletedEventPublisher.publish(fraudCheckCompletedEvent);
 
 		return toResponse(updatedTransaction);
 	}
