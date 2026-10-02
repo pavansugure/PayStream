@@ -1,12 +1,17 @@
 package com.paystream.transaction.service;
 
+import com.paystream.transaction.client.FraudClient;
 import com.paystream.transaction.client.MerchantValidationClient;
+import com.paystream.transaction.client.dto.FraudCheckRequest;
+import com.paystream.transaction.client.dto.FraudCheckResponse;
 import com.paystream.transaction.client.dto.MerchantStatusResponse;
 import com.paystream.transaction.dto.CreateTransactionRequest;
 import com.paystream.transaction.dto.TransactionResponse;
 import com.paystream.transaction.entity.Transaction;
 import com.paystream.transaction.entity.TransactionStatus;
+import com.paystream.transaction.event.TransactionInitiatedEvent;
 import com.paystream.transaction.exception.MerchantNotVerifiedException;
+import com.paystream.transaction.messaging.TransactionEventPublisher;
 import com.paystream.transaction.repository.TransactionRepository;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -19,12 +24,17 @@ public class TransactionServiceImpl implements TransactionService {
 
 	private final TransactionRepository transactionRepository;
 	private final MerchantValidationClient merchantValidationClient;
+	private final FraudClient fraudClient;
+	private final TransactionEventPublisher transactionEventPublisher;
 
 	public TransactionServiceImpl(TransactionRepository transactionRepository,
-			MerchantValidationClient merchantValidationClient) {
+			MerchantValidationClient merchantValidationClient, FraudClient fraudClient,
+			TransactionEventPublisher transactionEventPublisher) {
 
 		this.transactionRepository = transactionRepository;
 		this.merchantValidationClient = merchantValidationClient;
+		this.fraudClient = fraudClient;
+		this.transactionEventPublisher = transactionEventPublisher;
 	}
 
 	/**
@@ -36,12 +46,6 @@ public class TransactionServiceImpl implements TransactionService {
 	@Override
 	public TransactionResponse createTransaction(CreateTransactionRequest request, Authentication authentication) {
 
-		/*
-		 * The JWT "sub" claim contains the authenticated user's ID.
-		 *
-		 * We deliberately obtain the customer ID from Authentication instead of
-		 * trusting a customerId supplied by the client.
-		 */
 		Long customerId = Long.valueOf(authentication.getName());
 
 		MerchantStatusResponse merchant = merchantValidationClient.getMerchantStatus(request.merchantId());
@@ -55,11 +59,45 @@ public class TransactionServiceImpl implements TransactionService {
 		Instant now = Instant.now();
 
 		Transaction transaction = new Transaction(transactionReference, customerId, request.merchantId(),
-				request.amount(), request.currency(), TransactionStatus.INITIATED, now, now);
+				request.amount(), request.currency(), TransactionStatus.FRAUD_CHECK_PENDING, now, now);
 
 		Transaction savedTransaction = transactionRepository.save(transaction);
 
-		return toResponse(savedTransaction);
+		TransactionInitiatedEvent event = new TransactionInitiatedEvent(UUID.randomUUID().toString(),
+				savedTransaction.getTransactionReference(), savedTransaction.getCustomerId(),
+				savedTransaction.getMerchantId(), savedTransaction.getAmount(), savedTransaction.getCurrency(),
+				savedTransaction.getCreatedAt());
+
+		transactionEventPublisher.publish(event);
+
+		FraudCheckRequest fraudRequest = new FraudCheckRequest(savedTransaction.getId(),
+				savedTransaction.getCustomerId(), savedTransaction.getMerchantId(), savedTransaction.getAmount(),
+				savedTransaction.getCurrency());
+
+		FraudCheckResponse fraudResponse = fraudClient.checkTransaction(fraudRequest);
+
+		TransactionStatus finalStatus = mapFraudDecision(fraudResponse.decision());
+
+		savedTransaction.setStatus(finalStatus);
+		savedTransaction.setUpdatedAt(Instant.now());
+
+		Transaction updatedTransaction = transactionRepository.save(savedTransaction);
+
+		return toResponse(updatedTransaction);
+	}
+
+	private TransactionStatus mapFraudDecision(String decision) {
+
+		return switch (decision) {
+
+		case "APPROVED" -> TransactionStatus.APPROVED;
+
+		case "DECLINED" -> TransactionStatus.DECLINED;
+
+		case "MANUAL_REVIEW" -> TransactionStatus.MANUAL_REVIEW;
+
+		default -> throw new IllegalStateException("Unknown fraud decision: " + decision);
+		};
 	}
 
 	@Override
