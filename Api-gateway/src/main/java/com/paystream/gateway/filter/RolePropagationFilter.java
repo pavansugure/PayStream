@@ -10,78 +10,58 @@ import org.springframework.web.server.ServerWebExchange;
 
 import reactor.core.publisher.Mono;
 
-/**
- * Global Gateway filter responsible for propagating the authenticated user's
- * role to downstream microservices.
- *
- * Security flow:
- *
- * Client ↓ JWT ↓ Gateway validates JWT ↓ JWT "role" claim ↓ X-User-Role header
- * ↓ Downstream service
- *
- * The role is extracted only after Spring Security has authenticated the JWT.
- * Therefore, the client cannot simply choose its own role.
- */
 @Component
 public class RolePropagationFilter implements GlobalFilter, Ordered {
 
 	private static final String ROLE_HEADER = "X-User-Role";
+	private static final String USER_ID_HEADER = "X-User-Id";
 
 	@Override
 	public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
 
 		/*
-		 * Remove any X-User-Role header supplied by the client.
+		 * Remove client-supplied identity headers first.
 		 *
 		 * This prevents a malicious client from sending:
 		 *
-		 * X-User-Role: ADMIN
+		 * X-User-Id: another-user-id X-User-Role: ADMIN
 		 *
-		 * and pretending to be an administrator.
+		 * and trying to impersonate another user.
 		 */
-		ServerWebExchange sanitizedExchange = exchange.mutate()
-				.request(request -> request.headers(headers -> headers.remove(ROLE_HEADER))).build();
+		ServerWebExchange sanitizedExchange = exchange.mutate().request(request -> request.headers(headers -> {
+			headers.remove(ROLE_HEADER);
+			headers.remove(USER_ID_HEADER);
+		})).build();
 
-		/*
-		 * ReactiveSecurityContextHolder provides the SecurityContext created by Spring
-		 * Security after successful JWT validation.
-		 */
 		return ReactiveSecurityContextHolder.getContext().flatMap(securityContext -> {
 
 			var authentication = securityContext.getAuthentication();
 
-			/*
-			 * JwtAuthenticationToken contains the authenticated JWT and therefore gives us
-			 * access to its claims.
-			 */
 			if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
 
 				String role = jwtAuthentication.getToken().getClaimAsString("role");
 
-				if (role != null && !role.isBlank()) {
+				String userId = jwtAuthentication.getToken().getSubject();
 
-					ServerWebExchange exchangeWithRole = sanitizedExchange.mutate()
-							.request(request -> request.headers(headers -> headers.set(ROLE_HEADER, role))).build();
+				ServerWebExchange exchangeWithIdentity = sanitizedExchange.mutate()
+						.request(request -> request.headers(headers -> {
 
-					return chain.filter(exchangeWithRole);
-				}
+							if (role != null && !role.isBlank()) {
+								headers.set(ROLE_HEADER, role);
+							}
+
+							if (userId != null && !userId.isBlank()) {
+								headers.set(USER_ID_HEADER, userId);
+							}
+						})).build();
+
+				return chain.filter(exchangeWithIdentity);
 			}
 
-			/*
-			 * No role was found.
-			 *
-			 * Continue without creating a trusted role header.
-			 */
 			return chain.filter(sanitizedExchange);
 		}).switchIfEmpty(chain.filter(sanitizedExchange));
 	}
 
-	/**
-	 * Run the filter after Spring Security has established the authenticated
-	 * SecurityContext.
-	 *
-	 * A lower numerical value means higher priority.
-	 */
 	@Override
 	public int getOrder() {
 		return 100;

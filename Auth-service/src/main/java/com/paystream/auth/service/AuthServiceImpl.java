@@ -3,6 +3,8 @@ package com.paystream.auth.service;
 import com.paystream.auth.dto.CustomerRegisterRequest;
 import com.paystream.auth.dto.LoginRequest;
 import com.paystream.auth.dto.LoginResponse;
+import com.paystream.auth.dto.MerchantProfileRequest;
+import com.paystream.auth.dto.MerchantProfileResponse;
 import com.paystream.auth.dto.MerchantRegisterRequest;
 import com.paystream.auth.dto.MerchantStatusResponse;
 import com.paystream.auth.dto.RegisterRequest;
@@ -23,7 +25,12 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 
 import com.paystream.auth.entity.MerchantProfile;
+import com.paystream.auth.repository.CustomerProfileRepository;
 import com.paystream.auth.repository.MerchantProfileRepository;
+import com.paystream.auth.Enum.AccountType;
+import com.paystream.auth.dto.CustomerProfileRequest;
+import com.paystream.auth.dto.CustomerProfileResponse;
+import com.paystream.auth.entity.CustomerProfile;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,16 +51,18 @@ public class AuthServiceImpl implements AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final JwtEncoder jwtEncoder;
 	private final long jwtExpirationMs;
+	private final CustomerProfileRepository customerProfileRepository;
 
 	public AuthServiceImpl(UserRepository userRepository, MerchantProfileRepository merchantProfileRepository,
-			PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder,
-			@Value("${jwt.expiration-ms}") long jwtExpirationMs) {
+			PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder, @Value("${jwt.expiration-ms}") long jwtExpirationMs,
+			CustomerProfileRepository customerProfileRepository) {
 
 		this.userRepository = userRepository;
 		this.merchantProfileRepository = merchantProfileRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtEncoder = jwtEncoder;
 		this.jwtExpirationMs = jwtExpirationMs;
+		this.customerProfileRepository = customerProfileRepository;
 	}
 
 	@Override
@@ -90,9 +99,15 @@ public class AuthServiceImpl implements AuthService {
 
 		case CustomerRegisterRequest customer -> {
 
-			User user = new User(customer.username(), customer.email(), encodedPassword, "CUSTOMER");
+			User user = new User(customer.username(), customer.email(), passwordEncoder.encode(customer.password()),
+					AccountType.CUSTOMER.name());
 
-			userRepository.save(user);
+			User savedUser = userRepository.save(user);
+
+			CustomerProfile profile = new CustomerProfile(savedUser, "Unknown", "Unknown", null, null, null, null, null,
+					null, null);
+
+			customerProfileRepository.save(profile);
 		}
 
 		case MerchantRegisterRequest merchant -> {
@@ -209,5 +224,88 @@ public class AuthServiceImpl implements AuthService {
 		merchantProfile.setVerified(true);
 
 		merchantProfileRepository.save(merchantProfile);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public CustomerProfileResponse getCustomerProfile(Long userId) {
+
+		User user = userRepository.findById(userId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+		CustomerProfile profile = customerProfileRepository.findByUserId(userId)
+				.orElseThrow(() -> new IllegalArgumentException("Customer profile not found"));
+
+		return toCustomerProfileResponse(user, profile);
+	}
+
+	@Override
+	@Transactional
+	public CustomerProfileResponse updateCustomerProfile(Long userId, CustomerProfileRequest request) {
+
+		User user = userRepository.findById(userId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+		CustomerProfile profile = customerProfileRepository.findByUserId(userId)
+				.orElseThrow(() -> new IllegalArgumentException("Customer profile not found"));
+
+		if (request.phoneNumber() != null && !request.phoneNumber().isBlank()
+				&& !request.phoneNumber().equals(profile.getPhoneNumber())) {
+
+			customerProfileRepository.findByPhoneNumber(request.phoneNumber()).ifPresent(existingProfile -> {
+
+				if (!existingProfile.getUser().getId().equals(userId)) {
+
+					throw new IllegalArgumentException("Phone number is already in use");
+				}
+			});
+		}
+
+		profile.updateProfile(request.firstName(), request.lastName(), request.phoneNumber(), request.dateOfBirth(),
+				request.street(), request.city(), request.state(), request.postalCode(), request.country());
+
+		customerProfileRepository.save(profile);
+
+		return toCustomerProfileResponse(user, profile);
+	}
+
+	private CustomerProfileResponse toCustomerProfileResponse(User user, CustomerProfile profile) {
+
+		return new CustomerProfileResponse(user.getId(), user.getUsername(), user.getEmail(), profile.getFirstName(),
+				profile.getLastName(), profile.getPhoneNumber(), profile.getDateOfBirth(), profile.getStreet(),
+				profile.getCity(), profile.getState(), profile.getPostalCode(), profile.getCountry());
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public MerchantProfileResponse getMerchantProfile(Long userId) {
+
+		User user = userRepository.findById(userId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+		MerchantProfile merchantProfile = merchantProfileRepository.findByUserId(userId)
+				.orElseThrow(() -> new IllegalArgumentException("Merchant profile not found"));
+
+		return toMerchantProfileResponse(user, merchantProfile);
+	}
+
+	@Override
+	@Transactional
+	public MerchantProfileResponse updateMerchantProfile(Long userId, MerchantProfileRequest request) {
+
+		User user = userRepository.findById(userId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+		MerchantProfile merchantProfile = merchantProfileRepository.findByUserId(userId)
+				.orElseThrow(() -> new IllegalArgumentException("Merchant profile not found"));
+
+		merchantProfile.updateProfile(request.businessName(), request.category());
+
+		merchantProfileRepository.save(merchantProfile);
+
+		return toMerchantProfileResponse(user, merchantProfile);
+	}
+
+	private MerchantProfileResponse toMerchantProfileResponse(User user, MerchantProfile merchantProfile) {
+
+		return new MerchantProfileResponse(merchantProfile.getMerchantId(), user.getId(), user.getUsername(),
+				user.getEmail(), merchantProfile.getBusinessName(), merchantProfile.getCategory(),
+				merchantProfile.isVerified());
 	}
 }

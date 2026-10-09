@@ -55,6 +55,12 @@ public class MerchantProfile {
 		this.verified = false;
 	}
 
+	public void updateProfile(String businessName, String category) {
+
+		this.businessName = businessName;
+		this.category = category;
+	}
+
 	public Long getMerchantId() {
 		return merchantId;
 	}

@@ -19,6 +19,8 @@ public class SecurityConfig {
 
 				// Only ADMIN can verify merchants
 				.requestMatchers("/api/auth/admin/**").hasRole("ADMIN")
+				
+				.requestMatchers("/api/auth/profile").hasRole("CUSTOMER")
 
 				// All remaining endpoints require authentication
 				.anyRequest().authenticated())

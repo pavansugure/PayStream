@@ -11,9 +11,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestHeader;
+
+import com.paystream.auth.dto.CustomerProfileRequest;
+import com.paystream.auth.dto.CustomerProfileResponse;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -68,5 +74,20 @@ public class AuthController {
 		authService.verifyMerchant(merchantId);
 
 		return ResponseEntity.ok().build();
+	}
+
+	@GetMapping("/profile")
+	@PreAuthorize("hasRole('CUSTOMER')")
+	public CustomerProfileResponse getCustomerProfile(@RequestHeader("X-User-Id") String userId) {
+
+		return authService.getCustomerProfile(Long.valueOf(userId));
+	}
+
+	@PutMapping("/profile")
+	@PreAuthorize("hasRole('CUSTOMER')")
+	public CustomerProfileResponse updateCustomerProfile(@RequestHeader("X-User-Id") String userId,
+			@Valid @RequestBody CustomerProfileRequest request) {
+
+		return authService.updateCustomerProfile(Long.valueOf(userId), request);
 	}
 }

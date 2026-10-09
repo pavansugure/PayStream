@@ -71,4 +71,8 @@ public class User {
 	public void setRole(String role) {
 		this.role = role;
 	}
+	
+	public void updateEmail(String email) {
+	    this.email = email;
+	}
 }
